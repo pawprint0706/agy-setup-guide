@@ -29,6 +29,7 @@
   "stack_with_default": false
 }
 ```
+- macOS의 경우 `"command"` 경로에 `/Users/<사용자명>/.gemini/antigravity-cli/bin/agy-statusline`을 지정합니다.
 - `"stack_with_default": false`로 설정하면 기본 내장 상태표시줄 대신 커스텀 출력만 단일 줄로 표시됩니다.
 
 ### 2.2 `stdin`으로 전달되는 `StatusLineData` JSON 스키마
@@ -463,6 +464,8 @@ func main() {
 
 ### Step 2. 바이너리 컴파일
 
+#### Windows (PowerShell)
+
 PowerShell에서 아래 명령으로 실행 파일을 빌드합니다(Go가 없을 경우 Python/Node 스크립트로 대체 가능하지만 Go 단일 실행 파일을 권장합니다).
 
 ```powershell
@@ -473,12 +476,24 @@ if (-not (Test-Path go.mod)) { go mod init agy-statusline }
 go build -ldflags="-s -w" -o "$binDir\agy-statusline.exe" "$binDir\agy-statusline.go"
 ```
 
+#### macOS (`zsh` / `bash`)
+
+macOS에서는 `.exe` 확장자 없이 네이티브 실행 파일(`darwin/arm64` 또는 `darwin/amd64`)로 빌드합니다. `agy` 내부 샌드박스에서 빌드할 경우 `GOCACHE=/tmp/go-cache`를 지정합니다.
+
+```zsh
+BIN_DIR="$HOME/.gemini/antigravity-cli/bin"
+mkdir -p "$BIN_DIR"
+GOCACHE=/tmp/go-cache go build -ldflags="-s -w" -o "$BIN_DIR/agy-statusline" "$BIN_DIR/agy-statusline.go"
+chmod +x "$BIN_DIR/agy-statusline"
+```
+
 ---
 
 ### Step 3. `~/.gemini/antigravity-cli/settings.json` 업데이트
 
 기존 설정(`model`, `trustedWorkspaces` 등)을 유지한 채 `"statusLine"` 필드를 추가합니다. 경로 구분자는 슬래시(`/`)를 사용합니다.
 
+#### Windows 예시
 ```json
 {
   "model": "Gemini 4 Argon (Medium)",
@@ -495,15 +510,81 @@ go build -ldflags="-s -w" -o "$binDir\agy-statusline.exe" "$binDir\agy-statuslin
 }
 ```
 
+#### macOS 예시
+```json
+{
+  "model": "Gemini 4 Argon (Medium)",
+  "statusLine": {
+    "type": "command",
+    "command": "/Users/<사용자명>/.gemini/antigravity-cli/bin/agy-statusline",
+    "enabled": true,
+    "stack_with_default": false
+  }
+}
+```
+
+> **macOS / AI 에이전트 작업 시 주의사항 (`System Protection Boundary`)**
+> `agy` 내부에서 동작하는 AI 에이전트는 시스템 보호 경계 규칙(`Matches hardcoded system protection boundary rule`)에 의해 `~/.gemini/antigravity-cli/settings.json`을 직접 읽거나 수정할 수 없습니다. 따라서 에이전트는 워크스페이스 내에 `agy-statusline.go`, 빌드된 `agy-statusline` 바이너리, 그리고 설치 스크립트(`install-macos.sh`)를 생성·검증한 뒤 사용자가 터미널에서 `install-macos.sh`를 1회 실행하도록 안내합니다.
+
+#### macOS 원클릭 설치 스크립트 (`install-macos.sh`)
+```zsh
+#!/usr/bin/env zsh
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+BIN_DIR="$HOME/.gemini/antigravity-cli/bin"
+SETTINGS_FILE="$HOME/.gemini/antigravity-cli/settings.json"
+TARGET_BIN="$BIN_DIR/agy-statusline"
+
+mkdir -p "$BIN_DIR"
+cp "$SCRIPT_DIR/agy-statusline.go" "$BIN_DIR/agy-statusline.go"
+cp "$SCRIPT_DIR/agy-statusline" "$TARGET_BIN"
+chmod +x "$TARGET_BIN"
+
+python3 - "$SETTINGS_FILE" "$TARGET_BIN" <<'PY'
+import json
+import os
+import sys
+
+settings_path, target_bin = sys.argv[1], sys.argv[2]
+data = {}
+if os.path.exists(settings_path):
+    with open(settings_path, "r", encoding="utf-8") as f:
+        content = f.read().strip()
+        if content:
+            data = json.loads(content)
+
+data["statusLine"] = {
+    "type": "command",
+    "command": target_bin,
+    "enabled": True,
+    "stack_with_default": False,
+}
+
+with open(settings_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+
+print(f"Updated {settings_path} successfully.")
+PY
+```
+
 ---
 
 ### Step 4. 동작 검증
 
 샘플 페이로드를 파이프로 전달해 정상 출력 여부를 검증합니다.
 
+#### Windows (PowerShell)
 ```powershell
 $sample = '{"model":{"id":"gemini-4-argon-medium","display_name":"Gemini 4 Argon (Medium)","effort":"medium"},"context_window":{"used_percentage":14.2,"context_window_size":1048576},"quota":{"gemini-argon-wtu-weekly":{"remaining_fraction":0.752994}},"cycle_mode":"auto","task_count":1,"terminal_width":110}'
 $sample | & "$HOME\.gemini\antigravity-cli\bin\agy-statusline.exe"
+```
+
+#### macOS (`zsh` / `bash`)
+```zsh
+printf '%s' '{"model":{"id":"gemini-4-argon-medium","display_name":"Gemini 4 Argon (Medium)","effort":"medium"},"context_window":{"used_percentage":14.2,"context_window_size":1048576},"quota":{"gemini-argon-wtu-weekly":{"remaining_fraction":0.752994}},"cycle_mode":"auto","task_count":1,"terminal_width":110}' \
+  | "$HOME/.gemini/antigravity-cli/bin/agy-statusline" && echo ""
 ```
 
 **기대 출력:**
